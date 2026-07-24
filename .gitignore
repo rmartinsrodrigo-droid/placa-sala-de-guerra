@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# dados locais (histórico de solicitações + PDFs gerados)
+/data
+scripts/saida-teste.eml

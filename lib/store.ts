@@ -1,3 +1,9 @@
+// Persistência das solicitações. Funciona em dois modos:
+// 1) Local (dev): filesystem em ./data/ — solicitações no JSON, PDFs em pasta.
+// 2) Produção (Vercel): Vercel Blob — um único JSON + um blob por PDF.
+// Detecta modo automaticamente pela presença de BLOB_READ_WRITE_TOKEN.
+
+import { head, put } from '@vercel/blob';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -14,6 +20,27 @@ export type Solicitacao = {
   logoNome: string;
   pdfPath: string;
 };
+
+type DadosEntrada = Omit<Solicitacao, 'id' | 'criadoEm' | 'pdfPath'>;
+
+const USA_BLOB = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+const NOME_LISTA = 'solicitacoes.json';
+
+// ---------- API pública ----------
+
+export async function listar(): Promise<Solicitacao[]> {
+  return USA_BLOB ? blobListar() : fsListar();
+}
+
+export async function adicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Promise<Solicitacao> {
+  return USA_BLOB ? blobAdicionar(dados, pdfBytes) : fsAdicionar(dados, pdfBytes);
+}
+
+export async function pdfDe(id: string): Promise<Uint8Array | null> {
+  return USA_BLOB ? blobPdfDe(id) : fsPdfDe(id);
+}
+
+// ---------- Implementação FILESYSTEM (local) ----------
 
 let cachedDataDir: string | null = null;
 
@@ -36,53 +63,95 @@ function dataDir(): string {
   return fallback;
 }
 
-function dbPath() {
-  return path.join(dataDir(), 'solicitacoes.json');
+function fsPaths() {
+  return {
+    dbPath: path.join(dataDir(), NOME_LISTA),
+    pdfsDir: path.join(dataDir(), 'pdfs'),
+  };
 }
 
-function pdfsDir() {
-  return path.join(dataDir(), 'pdfs');
-}
-
-async function ensureDirs() {
+async function fsEnsureDirs() {
   await mkdir(dataDir(), { recursive: true });
-  await mkdir(pdfsDir(), { recursive: true });
+  await mkdir(fsPaths().pdfsDir, { recursive: true });
 }
 
-export async function listar(): Promise<Solicitacao[]> {
-  await ensureDirs();
-  if (!existsSync(dbPath())) return [];
+async function fsListar(): Promise<Solicitacao[]> {
+  await fsEnsureDirs();
+  const { dbPath } = fsPaths();
+  if (!existsSync(dbPath)) return [];
   try {
-    const raw = await readFile(dbPath(), 'utf-8');
+    const raw = await readFile(dbPath, 'utf-8');
     const arr = JSON.parse(raw);
     return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-export async function adicionar(dados: Omit<Solicitacao, 'id' | 'criadoEm' | 'pdfPath'>, pdfBytes: Uint8Array): Promise<Solicitacao> {
-  await ensureDirs();
+async function fsAdicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Promise<Solicitacao> {
+  await fsEnsureDirs();
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const pdfFile = `${id}.pdf`;
-  await writeFile(path.join(pdfsDir(), pdfFile), pdfBytes);
+  await writeFile(path.join(fsPaths().pdfsDir, pdfFile), pdfBytes);
 
-  const reg: Solicitacao = {
-    id,
-    criadoEm: new Date().toISOString(),
-    pdfPath: pdfFile,
-    ...dados,
-  };
-
-  const atual = await listar();
+  const reg: Solicitacao = { id, criadoEm: new Date().toISOString(), pdfPath: pdfFile, ...dados };
+  const atual = await fsListar();
   atual.unshift(reg);
-  await writeFile(dbPath(), JSON.stringify(atual, null, 2), 'utf-8');
+  await writeFile(fsPaths().dbPath, JSON.stringify(atual, null, 2), 'utf-8');
   return reg;
 }
 
-export async function pdfDe(id: string): Promise<Uint8Array | null> {
-  await ensureDirs();
-  const file = path.join(pdfsDir(), `${id}.pdf`);
+async function fsPdfDe(id: string): Promise<Uint8Array | null> {
+  await fsEnsureDirs();
+  const file = path.join(fsPaths().pdfsDir, `${id}.pdf`);
   if (!existsSync(file)) return null;
   return new Uint8Array(await readFile(file));
+}
+
+// ---------- Implementação VERCEL BLOB (produção) ----------
+
+async function blobListar(): Promise<Solicitacao[]> {
+  try {
+    const info = await head(NOME_LISTA);
+    const resp = await fetch(info.url, { cache: 'no-store' });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return []; // não existe ainda
+  }
+}
+
+async function blobAdicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Promise<Solicitacao> {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const pdfPath = `pdfs/${id}.pdf`;
+
+  await put(pdfPath, Buffer.from(pdfBytes), {
+    access: 'public',
+    contentType: 'application/pdf',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+
+  const reg: Solicitacao = { id, criadoEm: new Date().toISOString(), pdfPath, ...dados };
+  const atual = await blobListar();
+  atual.unshift(reg);
+
+  await put(NOME_LISTA, JSON.stringify(atual, null, 2), {
+    access: 'public',
+    contentType: 'application/json',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+
+  return reg;
+}
+
+async function blobPdfDe(id: string): Promise<Uint8Array | null> {
+  try {
+    const info = await head(`pdfs/${id}.pdf`);
+    const resp = await fetch(info.url, { cache: 'no-store' });
+    if (!resp.ok) return null;
+    return new Uint8Array(await resp.arrayBuffer());
+  } catch {
+    return null;
+  }
 }

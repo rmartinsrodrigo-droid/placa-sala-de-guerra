@@ -1,5 +1,5 @@
-const VERSAO = 'v1.0';
-const DATA_ATUALIZACAO = '24/07/2026';
+const VERSAO = 'v1.1';
+const DATA_ATUALIZACAO = '05/08/2026';
 
 export default function Rodape() {
   return (

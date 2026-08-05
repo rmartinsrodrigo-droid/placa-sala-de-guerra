@@ -13,16 +13,17 @@ export async function GET() {
 
   if (usaBlob) {
     try {
-      const { put, head } = await import('@vercel/blob');
-      const testKey = `_diagnostico/ping-${Date.now()}.txt`;
-      const written = await put(testKey, Buffer.from('ping ' + new Date().toISOString()), {
-        access: 'public',
+      const { put, get } = await import('@vercel/blob');
+      const testKey = `_diagnostico/ping.txt`;
+      await put(testKey, Buffer.from('ping ' + new Date().toISOString()), {
+        access: 'private',
         contentType: 'text/plain',
         addRandomSuffix: false,
         allowOverwrite: true,
       });
-      const info = await head(testKey);
-      blobTest = { ok: true, url: info.url };
+      const result = await get(testKey, { access: 'private' });
+      const content = result?.stream ? await new Response(result.stream).text() : '(vazio)';
+      blobTest = { ok: true, url: `read: ${content.slice(0, 40)}…` };
     } catch (e) {
       blobTest = { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
     }

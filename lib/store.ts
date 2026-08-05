@@ -1,9 +1,9 @@
 // Persistência das solicitações. Funciona em dois modos:
 // 1) Local (dev): filesystem em ./data/ — solicitações no JSON, PDFs em pasta.
-// 2) Produção (Vercel): Vercel Blob — um único JSON + um blob por PDF.
+// 2) Produção (Vercel): Vercel Blob (store PRIVATE) — um único JSON + um blob por PDF.
 // Detecta modo automaticamente pela presença de BLOB_READ_WRITE_TOKEN.
 
-import { head, put } from '@vercel/blob';
+import { get, put } from '@vercel/blob';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -28,8 +28,8 @@ const NOME_LISTA = 'solicitacoes.json';
 
 // ---------- API pública ----------
 
-// Todas as leituras são resilientes: se o storage falhar (ex.: token faltando
-// ou disco read-only no Vercel), retornamos vazio e logamos, em vez de crashar.
+// Todas as leituras são resilientes: se o storage falhar, retornam vazio
+// e logam o erro em vez de propagar 500.
 
 export async function listar(): Promise<Solicitacao[]> {
   try {
@@ -119,18 +119,20 @@ async function fsPdfDe(id: string): Promise<Uint8Array | null> {
   return new Uint8Array(await readFile(file));
 }
 
-// ---------- Implementação VERCEL BLOB (produção) ----------
+// ---------- Implementação VERCEL BLOB (produção · store PRIVATE) ----------
+//
+// Store criado como PRIVATE na Vercel — precisa passar `access: 'private'`
+// em put() e usar `get()` (em vez de head+fetch) pra ler o conteúdo, porque
+// URLs de blobs privados são assinadas com expiração.
 
 async function blobListar(): Promise<Solicitacao[]> {
+  const result = await get(NOME_LISTA, { access: 'private' });
+  if (!result || result.statusCode !== 200 || !result.stream) return [];
+  const text = await new Response(result.stream).text();
   try {
-    const info = await head(NOME_LISTA);
-    const resp = await fetch(info.url, { cache: 'no-store' });
-    if (!resp.ok) return [];
-    const data = await resp.json();
+    const data = JSON.parse(text);
     return Array.isArray(data) ? data : [];
-  } catch {
-    return []; // não existe ainda
-  }
+  } catch { return []; }
 }
 
 async function blobAdicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Promise<Solicitacao> {
@@ -138,7 +140,7 @@ async function blobAdicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Promise
   const pdfPath = `pdfs/${id}.pdf`;
 
   await put(pdfPath, Buffer.from(pdfBytes), {
-    access: 'public',
+    access: 'private',
     contentType: 'application/pdf',
     addRandomSuffix: false,
     allowOverwrite: true,
@@ -149,7 +151,7 @@ async function blobAdicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Promise
   atual.unshift(reg);
 
   await put(NOME_LISTA, JSON.stringify(atual, null, 2), {
-    access: 'public',
+    access: 'private',
     contentType: 'application/json',
     addRandomSuffix: false,
     allowOverwrite: true,
@@ -159,12 +161,8 @@ async function blobAdicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Promise
 }
 
 async function blobPdfDe(id: string): Promise<Uint8Array | null> {
-  try {
-    const info = await head(`pdfs/${id}.pdf`);
-    const resp = await fetch(info.url, { cache: 'no-store' });
-    if (!resp.ok) return null;
-    return new Uint8Array(await resp.arrayBuffer());
-  } catch {
-    return null;
-  }
+  const result = await get(`pdfs/${id}.pdf`, { access: 'private' });
+  if (!result || result.statusCode !== 200 || !result.stream) return null;
+  const buf = await new Response(result.stream).arrayBuffer();
+  return new Uint8Array(buf);
 }

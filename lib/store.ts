@@ -28,8 +28,16 @@ const NOME_LISTA = 'solicitacoes.json';
 
 // ---------- API pública ----------
 
+// Todas as leituras são resilientes: se o storage falhar (ex.: token faltando
+// ou disco read-only no Vercel), retornamos vazio e logamos, em vez de crashar.
+
 export async function listar(): Promise<Solicitacao[]> {
-  return USA_BLOB ? blobListar() : fsListar();
+  try {
+    return USA_BLOB ? await blobListar() : await fsListar();
+  } catch (e) {
+    console.error('[store] listar() falhou:', e);
+    return [];
+  }
 }
 
 export async function adicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Promise<Solicitacao> {
@@ -37,7 +45,12 @@ export async function adicionar(dados: DadosEntrada, pdfBytes: Uint8Array): Prom
 }
 
 export async function pdfDe(id: string): Promise<Uint8Array | null> {
-  return USA_BLOB ? blobPdfDe(id) : fsPdfDe(id);
+  try {
+    return USA_BLOB ? await blobPdfDe(id) : await fsPdfDe(id);
+  } catch (e) {
+    console.error('[store] pdfDe() falhou:', e);
+    return null;
+  }
 }
 
 // ---------- Implementação FILESYSTEM (local) ----------

@@ -18,7 +18,8 @@ const Schema = z.object({
 const MIMES_ACEITOS = new Set(['image/png', 'image/jpeg', 'application/pdf']);
 const TAMANHO_MAX = 10 * 1024 * 1024;
 
-const GRAFICA_EMAIL = process.env.GRAFICA_EMAIL;
+// Override opcional via env: DESTINATARIOS="a@x.com,b@x.com,c@x.com"
+const DESTINATARIOS = process.env.DESTINATARIOS?.split(',').map((s) => s.trim()).filter(Boolean);
 const COPIA_FIXA_EMAIL = process.env.COPIA_FIXA_EMAIL;
 
 export async function POST(req: Request) {
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
     clienteEmpresa: dados.clienteEmpresa,
     siteCliente: dados.siteCliente || '',
     pdfBytes,
-    graficaEmail: GRAFICA_EMAIL,
+    destinatarios: DESTINATARIOS,
     copiaFixaEmail: COPIA_FIXA_EMAIL,
   });
 

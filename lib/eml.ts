@@ -8,7 +8,7 @@ type Anexo = {
 };
 
 type Args = {
-  to: string;
+  to: string | string[];
   cc: string[];
   subject: string;
   bodyHtml: string;
@@ -25,7 +25,8 @@ export function montarEml(a: Args): Uint8Array {
   const partes: string[] = [];
 
   // Cabeçalhos principais
-  partes.push(`To: ${a.to}`);
+  const toStr = Array.isArray(a.to) ? a.to.join(', ') : a.to;
+  partes.push(`To: ${toStr}`);
   if (a.cc.length) partes.push(`Cc: ${a.cc.join(', ')}`);
   partes.push(`Subject: ${encodeSubject(a.subject)}`);
   partes.push('X-Unsent: 1'); // faz o Outlook abrir como rascunho

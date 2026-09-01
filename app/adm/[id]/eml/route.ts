@@ -4,7 +4,7 @@ import { montarEmailDoPedido } from '@/lib/email-do-pedido';
 
 export const runtime = 'nodejs';
 
-const GRAFICA_EMAIL = process.env.GRAFICA_EMAIL;
+const DESTINATARIOS = process.env.DESTINATARIOS?.split(',').map((s) => s.trim()).filter(Boolean);
 const COPIA_FIXA_EMAIL = process.env.COPIA_FIXA_EMAIL;
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -27,7 +27,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     clienteEmpresa: s.clienteEmpresa,
     siteCliente: s.siteCliente,
     pdfBytes,
-    graficaEmail: GRAFICA_EMAIL,
+    destinatarios: DESTINATARIOS,
     copiaFixaEmail: COPIA_FIXA_EMAIL,
   });
 
